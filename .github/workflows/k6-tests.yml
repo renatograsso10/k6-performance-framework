@@ -423,7 +423,7 @@ jobs:
                   fi
                 fi
               done
-              cp -r "$dir"*.json gh-pages/run-${{ github.run_number }}/ 2>/dev/null || true
+              # Note: JSON files are NOT copied to avoid GitHub's 100MB limit
             fi
           done
           
