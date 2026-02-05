@@ -412,16 +412,31 @@ jobs:
         run: |
           mkdir -p gh-pages/run-${{ github.run_number }}
           
-          # Copy all HTML reports
+          # Copy all HTML reports and collect their names
+          REPORT_LINKS=""
           for dir in all-results/*/; do
             if [ -d "$dir" ]; then
-              cp -r "$dir"*.html gh-pages/run-${{ github.run_number }}/ 2>/dev/null || true
+              for file in "$dir"*.html; do
+                if [ -f "$file" ]; then
+                  filename=$(basename "$file")
+                  cp "$file" gh-pages/run-${{ github.run_number }}/ 2>/dev/null || true
+                  if [ "$filename" != "index.html" ]; then
+                    name=$(echo "$filename" | sed 's/-report.html//' | sed 's/.html//' | tr '[:lower:]' '[:upper:]')
+                    REPORT_LINKS="$REPORT_LINKS<a href=\"$filename\"><span class=\"icon\">📊</span>$name Test Report</a>"
+                  fi
+                fi
+              done
               cp -r "$dir"*.json gh-pages/run-${{ github.run_number }}/ 2>/dev/null || true
             fi
           done
           
-          # Generate index.html for this run
-          cat > gh-pages/run-${{ github.run_number }}/index.html << 'EOF'
+          # Default message if no reports
+          if [ -z "$REPORT_LINKS" ]; then
+            REPORT_LINKS='<p style="color:#94a3b8">No reports found in this run.</p>'
+          fi
+          
+          # Generate static index.html for this run
+          cat > gh-pages/run-${{ github.run_number }}/index.html << RUNEOF
           <!DOCTYPE html>
           <html lang="en">
           <head>
@@ -431,7 +446,7 @@ jobs:
               <style>
                   :root { --bg: #0f172a; --card: #1e293b; --text: #f1f5f9; --muted: #94a3b8; --primary: #7c3aed; }
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding: 2rem; }
+                  body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding: 2rem; }
                   .container { max-width: 800px; margin: 0 auto; }
                   h1 { font-size: 2rem; margin-bottom: 0.5rem; background: linear-gradient(135deg, #7c3aed, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
                   .meta { color: var(--muted); margin-bottom: 2rem; }
@@ -439,36 +454,20 @@ jobs:
                   a { display: block; background: var(--card); padding: 1.5rem; border-radius: 12px; text-decoration: none; color: var(--text); transition: all 0.3s; border: 1px solid rgba(255,255,255,0.1); }
                   a:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.3); background: #334155; }
                   .icon { font-size: 1.5rem; margin-right: 0.75rem; }
-                  .back { display: inline-block; margin-top: 2rem; color: var(--primary); text-decoration: none; }
+                  .back { display: inline-block; margin-top: 2rem; color: var(--primary); text-decoration: none; background: transparent; border: none; padding: 0; }
+                  .back:hover { background: transparent; }
               </style>
           </head>
           <body>
               <div class="container">
                   <h1>K6 Performance Reports</h1>
                   <p class="meta">Run #${{ github.run_number }} | ${{ github.event_name }} | $(date '+%Y-%m-%d %H:%M:%S UTC')</p>
-                  <div class="reports" id="reports"></div>
+                  <div class="reports">$REPORT_LINKS</div>
                   <a href="../" class="back">← All Runs</a>
               </div>
-              <script>
-                  const files = document.querySelectorAll ? null : null;
-                  fetch('.')
-                      .then(r => r.text())
-                      .then(html => {
-                          const matches = html.match(/href="([^"]+\.html)"/g) || [];
-                          const reports = document.getElementById('reports');
-                          matches.forEach(m => {
-                              const file = m.match(/href="([^"]+)"/)[1];
-                              if (file !== 'index.html') {
-                                  const name = file.replace('-report.html', '').replace('.html', '').toUpperCase();
-                                  reports.innerHTML += '<a href="' + file + '"><span class="icon">📊</span>' + name + ' Test Report</a>';
-                              }
-                          });
-                          if (reports.innerHTML === '') reports.innerHTML = '<p style="color:#94a3b8">No reports found in this run.</p>';
-                      });
-              </script>
           </body>
           </html>
-          EOF
+          RUNEOF
       
       - name: Generate main index
         run: |
