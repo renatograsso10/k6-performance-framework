@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>K6 Performance Reports</title>
+    <style>
+        :root { --bg: #0f172a; --card: #1e293b; --text: #f1f5f9; --muted: #94a3b8; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding: 2rem; }
+        .container { max-width: 800px; margin: 0 auto; }
+        h1 { font-size: 2rem; margin-bottom: 2rem; background: linear-gradient(135deg, #7c3aed, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .runs { display: grid; gap: 1rem; }
+        a { display: block; background: var(--card); padding: 1.5rem; border-radius: 12px; text-decoration: none; color: var(--text); transition: all 0.3s; border: 1px solid rgba(255,255,255,0.1); }
+        a:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>K6 Performance Reports</h1>
+        <div class="runs" id="runs"></div>
+    </div>
+    <script>
+        fetch('.')
+            .then(r => r.text())
+            .then(html => {
+                const matches = html.match(/href="(run-\d+)\/?"/g) || [];
+                const runs = document.getElementById('runs');
+                const unique = [...new Set(matches.map(m => m.match(/run-(\d+)/)[1]))];
+                unique.sort((a, b) => parseInt(b) - parseInt(a));
+                unique.forEach(num => {
+                    runs.innerHTML += '<a href="run-' + num + '/">📁 Run #' + num + '</a>';
+                });
+                if (runs.innerHTML === '') runs.innerHTML = '<p style="color:#94a3b8">No reports yet.</p>';
+            });
+    </script>
+</body>
+</html>
