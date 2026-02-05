@@ -472,8 +472,26 @@ jobs:
       
       - name: Generate main index
         run: |
-          # Create/update main index.html
-          cat > gh-pages/index.html << 'EOF'
+          # Fetch existing runs.json from gh-pages if it exists
+          git fetch origin gh-pages:gh-pages 2>/dev/null || true
+          if git show gh-pages:runs.json > gh-pages/runs.json 2>/dev/null; then
+            echo "Found existing runs.json"
+          else
+            echo "[]" > gh-pages/runs.json
+          fi
+          
+          # Add current run to runs.json
+          CURRENT_RUN=${{ github.run_number }}
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          
+          # Read existing runs and add new one
+          EXISTING=$(cat gh-pages/runs.json)
+          echo "$EXISTING" | jq --arg run "$CURRENT_RUN" --arg ts "$TIMESTAMP" \
+            '. + [{"run": $run, "timestamp": $ts}] | unique_by(.run) | sort_by(.run | tonumber) | reverse' \
+            > gh-pages/runs.json
+          
+          # Create main index.html that reads from runs.json
+          cat > gh-pages/index.html << 'INDEXEOF'
           <!DOCTYPE html>
           <html lang="en">
           <head>
@@ -481,38 +499,48 @@ jobs:
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>K6 Performance Reports</title>
               <style>
-                  :root { --bg: #0f172a; --card: #1e293b; --text: #f1f5f9; --muted: #94a3b8; }
+                  :root { --bg: #0f172a; --card: #1e293b; --text: #f1f5f9; --muted: #94a3b8; --primary: #7c3aed; }
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding: 2rem; }
+                  body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding: 2rem; }
                   .container { max-width: 800px; margin: 0 auto; }
-                  h1 { font-size: 2rem; margin-bottom: 2rem; background: linear-gradient(135deg, #7c3aed, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+                  h1 { font-size: 2rem; margin-bottom: 0.5rem; background: linear-gradient(135deg, #7c3aed, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+                  .subtitle { color: var(--muted); margin-bottom: 2rem; }
                   .runs { display: grid; gap: 1rem; }
-                  a { display: block; background: var(--card); padding: 1.5rem; border-radius: 12px; text-decoration: none; color: var(--text); transition: all 0.3s; border: 1px solid rgba(255,255,255,0.1); }
-                  a:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
+                  a { display: flex; justify-content: space-between; align-items: center; background: var(--card); padding: 1.25rem 1.5rem; border-radius: 12px; text-decoration: none; color: var(--text); transition: all 0.3s; border: 1px solid rgba(255,255,255,0.1); }
+                  a:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.3); border-color: var(--primary); }
+                  .run-info { display: flex; align-items: center; gap: 0.75rem; }
+                  .icon { font-size: 1.25rem; }
+                  .date { color: var(--muted); font-size: 0.875rem; }
+                  .loading { color: var(--muted); text-align: center; padding: 2rem; }
               </style>
           </head>
           <body>
               <div class="container">
                   <h1>K6 Performance Reports</h1>
-                  <div class="runs" id="runs"></div>
+                  <p class="subtitle">Automated performance test results</p>
+                  <div class="runs" id="runs"><p class="loading">Loading reports...</p></div>
               </div>
               <script>
-                  fetch('.')
-                      .then(r => r.text())
-                      .then(html => {
-                          const matches = html.match(/href="(run-\d+)\/?"/g) || [];
-                          const runs = document.getElementById('runs');
-                          const unique = [...new Set(matches.map(m => m.match(/run-(\d+)/)[1]))];
-                          unique.sort((a, b) => parseInt(b) - parseInt(a));
-                          unique.forEach(num => {
-                              runs.innerHTML += '<a href="run-' + num + '/">📁 Run #' + num + '</a>';
-                          });
-                          if (runs.innerHTML === '') runs.innerHTML = '<p style="color:#94a3b8">No reports yet.</p>';
+                  fetch('runs.json')
+                      .then(r => r.json())
+                      .then(runs => {
+                          const container = document.getElementById('runs');
+                          if (runs.length === 0) {
+                              container.innerHTML = '<p style="color:#94a3b8">No reports yet.</p>';
+                              return;
+                          }
+                          container.innerHTML = runs.map(r => {
+                              const date = new Date(r.timestamp).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+                              return '<a href="run-' + r.run + '/"><div class="run-info"><span class="icon">📊</span><span>Run #' + r.run + '</span></div><span class="date">' + date + '</span></a>';
+                          }).join('');
+                      })
+                      .catch(() => {
+                          document.getElementById('runs').innerHTML = '<p style="color:#94a3b8">No reports yet.</p>';
                       });
               </script>
           </body>
           </html>
-          EOF
+          INDEXEOF
       
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
