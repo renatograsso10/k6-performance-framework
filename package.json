@@ -1,0 +1,26 @@
+{
+  "name": "k6-performance-framework",
+  "version": "1.0.0",
+  "description": "Professional K6 performance testing framework with clean architecture",
+  "main": "tests/smoke.test.js",
+  "scripts": {
+    "smoke": "k6 run tests/smoke.test.js",
+    "load": "k6 run tests/load.test.js",
+    "stress": "k6 run tests/stress.test.js",
+    "spike": "k6 run tests/spike.test.js",
+    "soak": "k6 run tests/soak.test.js",
+    "smoke:report": "k6 run tests/smoke.test.js --out json=reports/smoke-results.json",
+    "load:report": "k6 run tests/load.test.js --out json=reports/load-results.json",
+    "stress:report": "k6 run tests/stress.test.js --out json=reports/stress-results.json",
+    "all": "npm run smoke && npm run load && npm run stress"
+  },
+  "keywords": [
+    "k6",
+    "performance",
+    "load-testing",
+    "stress-testing",
+    "api-testing"
+  ],
+  "author": "",
+  "license": "MIT"
+}

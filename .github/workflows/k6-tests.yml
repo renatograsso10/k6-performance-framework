@@ -1,0 +1,380 @@
+name: K6 Performance Tests
+
+on:
+  # Daily scheduled run at 11:00 AM Brasília (UTC-3 = 14:00 UTC)
+  schedule:
+    - cron: '0 14 * * *'
+  push:
+    branches: [main, develop]
+    paths:
+      - 'tests/**'
+      - 'src/**'
+      - '.github/workflows/k6-tests.yml'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: 'Test type'
+        required: true
+        default: 'smoke'
+        type: choice
+        options:
+          - smoke
+          - load
+          - stress
+          - spike
+          - soak
+          - endurance
+          - breakpoint
+          - all
+      environment:
+        description: 'Target environment'
+        required: false
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+          - development
+      send_to_grafana:
+        description: 'Send metrics to Grafana Cloud'
+        required: false
+        default: true
+        type: boolean
+
+env:
+  LOG_LEVEL: INFO
+  # Grafana Cloud settings from secrets
+  K6_PROMETHEUS_RW_SERVER_URL: ${{ secrets.GRAFANA_PROMETHEUS_URL }}
+  K6_PROMETHEUS_RW_USERNAME: ${{ secrets.GRAFANA_USERNAME }}
+  K6_PROMETHEUS_RW_PASSWORD: ${{ secrets.GRAFANA_API_TOKEN }}
+
+jobs:
+  # ============================================
+  # Smoke Test
+  # ============================================
+  smoke-test:
+    name: Smoke Test
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.test_type == 'smoke' || github.event.inputs.test_type == 'all' || github.event_name != 'workflow_dispatch' }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Install K6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install k6
+      
+      - name: Run Smoke Test
+        run: |
+          mkdir -p reports
+          if [ "${{ github.event.inputs.send_to_grafana }}" != "false" ] && [ -n "${{ secrets.GRAFANA_API_TOKEN }}" ]; then
+            k6 run tests/smoke.test.js --out experimental-prometheus-rw --out json=reports/smoke-results.json
+          else
+            k6 run tests/smoke.test.js --out json=reports/smoke-results.json
+          fi
+        env:
+          ENVIRONMENT: ${{ github.event.inputs.environment || 'production' }}
+      
+      - name: Upload Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-test-results
+          path: reports/
+          retention-days: 7
+
+  # ============================================
+  # Load Test
+  # ============================================
+  load-test:
+    name: Load Test
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.test_type == 'load' || github.event.inputs.test_type == 'all' }}
+    needs: [smoke-test]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Install K6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install k6
+      
+      - name: Run Load Test
+        run: |
+          mkdir -p reports
+          if [ "${{ github.event.inputs.send_to_grafana }}" != "false" ] && [ -n "${{ secrets.GRAFANA_API_TOKEN }}" ]; then
+            k6 run tests/load.test.js --out experimental-prometheus-rw --out json=reports/load-results.json
+          else
+            k6 run tests/load.test.js --out json=reports/load-results.json
+          fi
+        env:
+          ENVIRONMENT: ${{ github.event.inputs.environment || 'production' }}
+      
+      - name: Upload Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-test-results
+          path: reports/
+          retention-days: 7
+
+  # ============================================
+  # Stress Test
+  # ============================================
+  stress-test:
+    name: Stress Test
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.test_type == 'stress' || github.event.inputs.test_type == 'all' }}
+    needs: [load-test]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Install K6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install k6
+      
+      - name: Run Stress Test
+        run: |
+          mkdir -p reports
+          if [ "${{ github.event.inputs.send_to_grafana }}" != "false" ] && [ -n "${{ secrets.GRAFANA_API_TOKEN }}" ]; then
+            k6 run tests/stress.test.js --out experimental-prometheus-rw --out json=reports/stress-results.json
+          else
+            k6 run tests/stress.test.js --out json=reports/stress-results.json
+          fi
+        env:
+          ENVIRONMENT: ${{ github.event.inputs.environment || 'production' }}
+      
+      - name: Upload Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stress-test-results
+          path: reports/
+          retention-days: 7
+
+  # ============================================
+  # Spike Test
+  # ============================================
+  spike-test:
+    name: Spike Test
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.test_type == 'spike' || github.event.inputs.test_type == 'all' }}
+    needs: [smoke-test]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Install K6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install k6
+      
+      - name: Run Spike Test
+        run: |
+          mkdir -p reports
+          if [ "${{ github.event.inputs.send_to_grafana }}" != "false" ] && [ -n "${{ secrets.GRAFANA_API_TOKEN }}" ]; then
+            k6 run tests/spike.test.js --out experimental-prometheus-rw --out json=reports/spike-results.json
+          else
+            k6 run tests/spike.test.js --out json=reports/spike-results.json
+          fi
+        env:
+          ENVIRONMENT: ${{ github.event.inputs.environment || 'production' }}
+      
+      - name: Upload Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spike-test-results
+          path: reports/
+          retention-days: 7
+
+  # ============================================
+  # Soak Test
+  # ============================================
+  soak-test:
+    name: Soak Test
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.test_type == 'soak' }}
+    timeout-minutes: 45
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Install K6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install k6
+      
+      - name: Run Soak Test
+        run: |
+          mkdir -p reports
+          if [ "${{ github.event.inputs.send_to_grafana }}" != "false" ] && [ -n "${{ secrets.GRAFANA_API_TOKEN }}" ]; then
+            k6 run tests/soak.test.js --out experimental-prometheus-rw --out json=reports/soak-results.json
+          else
+            k6 run tests/soak.test.js --out json=reports/soak-results.json
+          fi
+        env:
+          ENVIRONMENT: ${{ github.event.inputs.environment || 'production' }}
+      
+      - name: Upload Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: soak-test-results
+          path: reports/
+          retention-days: 7
+
+  # ============================================
+  # Endurance Test
+  # ============================================
+  endurance-test:
+    name: Endurance Test
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.test_type == 'endurance' }}
+    timeout-minutes: 150
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Install K6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install k6
+      
+      - name: Run Endurance Test
+        run: |
+          mkdir -p reports
+          if [ "${{ github.event.inputs.send_to_grafana }}" != "false" ] && [ -n "${{ secrets.GRAFANA_API_TOKEN }}" ]; then
+            k6 run tests/endurance.test.js --out experimental-prometheus-rw --out json=reports/endurance-results.json
+          else
+            k6 run tests/endurance.test.js --out json=reports/endurance-results.json
+          fi
+        env:
+          ENVIRONMENT: ${{ github.event.inputs.environment || 'production' }}
+          ENDURANCE_DURATION: '2h'
+      
+      - name: Upload Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: endurance-test-results
+          path: reports/
+          retention-days: 14
+
+  # ============================================
+  # Breakpoint Test
+  # ============================================
+  breakpoint-test:
+    name: Breakpoint Test
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.test_type == 'breakpoint' }}
+    timeout-minutes: 30
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Install K6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install k6
+      
+      - name: Run Breakpoint Test
+        run: |
+          mkdir -p reports
+          if [ "${{ github.event.inputs.send_to_grafana }}" != "false" ] && [ -n "${{ secrets.GRAFANA_API_TOKEN }}" ]; then
+            k6 run tests/breakpoint.test.js --out experimental-prometheus-rw --out json=reports/breakpoint-results.json
+          else
+            k6 run tests/breakpoint.test.js --out json=reports/breakpoint-results.json
+          fi
+        env:
+          ENVIRONMENT: ${{ github.event.inputs.environment || 'production' }}
+      
+      - name: Upload Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: breakpoint-test-results
+          path: reports/
+          retention-days: 7
+
+  # ============================================
+  # Generate Summary Report
+  # ============================================
+  generate-summary:
+    name: Generate Report
+    runs-on: ubuntu-latest
+    needs: [smoke-test]
+    if: always()
+    
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-results
+      
+      - name: Create Summary Report
+        run: |
+          echo "## 🚀 K6 Performance Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Run:** #${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ github.event.inputs.environment || 'production' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -n "${{ secrets.GRAFANA_API_TOKEN }}" ]; then
+            echo "📊 **Grafana Dashboard:** [View Metrics](https://k6testinng.grafana.net/explore)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "### Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -d "all-results" ]; then
+            echo "| Test Type | Status |" >> $GITHUB_STEP_SUMMARY
+            echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+            
+            for dir in all-results/*/; do
+              test_name=$(basename "$dir" | sed 's/-test-results//')
+              echo "| $test_name | ✅ Completed |" >> $GITHUB_STEP_SUMMARY
+            done
+          else
+            echo "No test results found." >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "*Generated by K6 Performance Framework*" >> $GITHUB_STEP_SUMMARY
