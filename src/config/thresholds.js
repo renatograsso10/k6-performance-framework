@@ -61,5 +61,3 @@ export const thresholds = {
 export function getThresholds(type) {
     return thresholds[type] || thresholds.smoke;
 }
-
-export default { thresholds, getThresholds };

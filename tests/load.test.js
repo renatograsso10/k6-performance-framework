@@ -2,74 +2,40 @@
  * Load Test - Normal expected traffic simulation
  */
 
-import { group, sleep, check } from 'k6';
+import { group } from 'k6';
 import { getThresholds } from '../src/config/thresholds.js';
-import { getEnvironment } from '../src/config/environments.js';
-import { peopleApi } from '../src/api/peopleApi.js';
-import { planetsApi } from '../src/api/planetsApi.js';
-import { starshipsApi } from '../src/api/starshipsApi.js';
-import { filmsApi } from '../src/api/filmsApi.js';
-import { logger } from '../src/core/logger.js';
-import { generateHtmlReport, generateJsonSummary } from '../src/core/reporter.js';
-import { recordApiMetrics } from '../src/core/metrics.js';
+import { createRunProfile } from '../src/core/runProfile.js';
+import { checkSwapiResponse, getSwapiResource, randomSwapiResource } from '../src/workloads/swapi.js';
 
-export const options = {
-    stages: [
-        { duration: '2m', target: 50 },
-        { duration: '5m', target: 100 },
-        { duration: '5m', target: 100 },
-        { duration: '2m', target: 50 },
-        { duration: '1m', target: 0 }
-    ],
-    thresholds: getThresholds('load'),
-    summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)']
-};
+const profile = createRunProfile({
+    name: 'load',
+    options: {
+        scenarios: {
+            load: {
+                executor: 'constant-arrival-rate',
+                rate: 20,
+                timeUnit: '1s',
+                duration: '10m',
+                preAllocatedVUs: 25,
+                maxVUs: 100,
+                gracefulStop: '30s'
+            }
+        },
+        thresholds: getThresholds('load')
+    },
+    metadata: { intent: 'simulate expected traffic', workload: 'uniform SWAPI reads' }
+});
 
-const environment = getEnvironment();
-
-export function setup() {
-    logger.info('Starting LOAD Test', { testType: 'load', environment: environment.baseUrl });
-    return { startTime: Date.now() };
-}
+export const options = profile.options;
+export const setup = profile.setup;
+export const teardown = profile.teardown;
+export const handleSummary = profile.handleSummary;
 
 export default function () {
-    const endpoints = ['people', 'planets', 'starships', 'films'];
-    const endpoint = endpoints[Math.floor(Math.random() * endpoints.length)];
+    const endpoint = randomSwapiResource();
 
     group(`${endpoint} API`, () => {
-        let resp;
-        const id = Math.floor(Math.random() * 10) + 1;
-
-        switch (endpoint) {
-            case 'people':
-                resp = peopleApi.get(id);
-                break;
-            case 'planets':
-                resp = planetsApi.get(id);
-                break;
-            case 'starships':
-                resp = starshipsApi.get(id);
-                break;
-            case 'films':
-                resp = filmsApi.get(Math.min(id, 6));
-                break;
-        }
-
-        check(resp, { 'status ok': (r) => r.status === 200 });
-        recordApiMetrics(`${endpoint}.get`, resp.timings.duration, resp.status === 200, resp.status);
+        const response = getSwapiResource(endpoint);
+        checkSwapiResponse(response, `${endpoint}.get`);
     });
-
-    sleep(0.3);
-}
-
-export function teardown(data) {
-    const duration = (Date.now() - data.startTime) / 1000;
-    logger.info('LOAD Test Complete', { duration: `${(duration / 60).toFixed(1)} min` });
-}
-
-export function handleSummary(data) {
-    return {
-        'reports/load-report.html': generateHtmlReport(data, 'load'),
-        'reports/load-summary.json': JSON.stringify(generateJsonSummary(data), null, 2)
-    };
 }

@@ -3,39 +3,49 @@
  * Creates beautiful, detailed HTML reports from K6 test results
  */
 
-import { getBaseUrl } from '../config/environments.js';
-import { evaluateSLO } from '../config/slos.js';
+function thresholdPresentation(status) {
+    if (status === 'passed') return { color: '#10b981', cssClass: 'trend-good', label: 'PASSED', symbol: 'PASS' };
+    if (status === 'failed') return { color: '#ef4444', cssClass: 'trend-bad', label: 'FAILED', symbol: 'FAIL' };
+    return { color: '#94a3b8', cssClass: '', label: 'NOT EVALUATED', symbol: 'N/A' };
+}
 
-/**
- * Generate comprehensive HTML report
- * @param {Object} data - K6 summary data
- * @param {string} testType - Type of test (smoke, load, stress, etc.)
- * @returns {string} HTML content
- */
-export function generateHtmlReport(data, testType = 'performance', targetUrl = null) {
-    const metrics = data.metrics || {};
-    const timestamp = new Date().toISOString();
-    const apiTarget = targetUrl || getBaseUrl();
-
-    // Extract key metrics safely
-    const getMetricValue = (metric, key, defaultVal = 0) => {
-        return metrics[metric]?.values?.[key] ?? defaultVal;
-    };
-
-    const totalRequests = getMetricValue('http_reqs', 'count');
-    const requestRate = getMetricValue('http_reqs', 'rate').toFixed(2);
-    const avgDuration = getMetricValue('http_req_duration', 'avg').toFixed(2);
-    const p95Duration = getMetricValue('http_req_duration', 'p(95)').toFixed(2);
-    const p99Duration = getMetricValue('http_req_duration', 'p(99)').toFixed(2);
-    const minDuration = getMetricValue('http_req_duration', 'min').toFixed(2);
-    const maxDuration = getMetricValue('http_req_duration', 'max').toFixed(2);
-    const errorRate = (getMetricValue('http_req_failed', 'rate') * 100).toFixed(2);
-    const checksPass = (getMetricValue('checks', 'rate') * 100).toFixed(2);
-
-    // Determine pass/fail status
-    const isHealthy = parseFloat(errorRate) < 10 && parseFloat(checksPass) > 80;
-    const statusColor = isHealthy ? '#10b981' : '#ef4444';
-    const statusText = isHealthy ? 'PASSED' : 'FAILED';
+function escapeHtml(value) {
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+export function renderHtmlReport(model) {
+    const testType = escapeHtml(model.context.testType);
+    const apiTarget = escapeHtml(model.context.targetUrl);
+    const targetKind = escapeHtml(model.context.targetKind);
+    const runId = escapeHtml(model.context.runId);
+    const timestamp = escapeHtml(model.timestamp);
+    const totalRequests = model.summary.totalRequests;
+    const requestRate = model.summary.requestRate.toFixed(2);
+    const avgDuration = model.responseTime.avg.toFixed(2);
+    const p90Duration = model.responseTime.p90.toFixed(2);
+    const p95Duration = model.responseTime.p95.toFixed(2);
+    const p99Duration = model.responseTime.p99.toFixed(2);
+    const minDuration = model.responseTime.min.toFixed(2);
+    const maxDuration = model.responseTime.max.toFixed(2);
+    const errorRate = model.summary.errorRate.toFixed(2);
+    const checksPass = model.summary.checksPassed.toFixed(2);
+    const result = model.result;
+    const durationThreshold = model.thresholdStatus.duration;
+    const errorThreshold = model.thresholdStatus.errors;
+    const checksThreshold = model.thresholdStatus.checks;
+    const durationPresentation = thresholdPresentation(durationThreshold);
+    const errorPresentation = thresholdPresentation(errorThreshold);
+    const checksPresentation = thresholdPresentation(checksThreshold);
+    const statusColor = result.status === 'passed'
+        ? '#10b981'
+        : result.status === 'failed' ? '#ef4444' : '#f59e0b';
+    const statusText = result.status === 'no_data'
+        ? 'NO DATA'
+        : result.status.toUpperCase();
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -292,13 +302,15 @@ export function generateHtmlReport(data, testType = 'performance', targetUrl = n
                     <span style="color: var(--text-secondary); font-size: 0.875rem;">${testType.toUpperCase()} Test Results</span>
                 </div>
             </div>
-            <div class="status-badge">${statusText}</div>
+            <div class="status-badge" data-test-status="${result.status}">${statusText}</div>
         </header>
         
         <div class="meta-info">
             <span>📅 Generated: ${timestamp}</span>
             <span>⏱️ Test Type: ${testType}</span>
             <span>🎯 Target: ${apiTarget}</span>
+            <span>Target kind: ${targetKind}</span>
+            <span>Run ID: ${runId}</span>
         </div>
         
         <div class="kpi-grid">
@@ -311,36 +323,36 @@ export function generateHtmlReport(data, testType = 'performance', targetUrl = n
                 <div class="kpi-trend trend-good">@ ${requestRate} req/s</div>
             </div>
             
-            <div class="kpi-card">
+            <div class="kpi-card" data-metric="http_req_duration" data-threshold-status="${durationThreshold}">
                 <div class="kpi-header">
                     <span class="kpi-title">Response Time (p95)</span>
-                    <div class="kpi-icon" style="background: rgba(16, 185, 129, 0.2); color: var(--success);">⚡</div>
+                    <div class="kpi-icon" style="color: ${durationPresentation.color};">⚡</div>
                 </div>
                 <div class="kpi-value">${p95Duration}<span class="kpi-unit">ms</span></div>
-                <div class="kpi-trend ${parseFloat(p95Duration) < 2000 ? 'trend-good' : 'trend-warning'}">
-                    p99: ${p99Duration}ms
+                <div class="kpi-trend ${durationPresentation.cssClass}">
+                    Threshold: ${durationPresentation.label}
                 </div>
             </div>
             
-            <div class="kpi-card">
+            <div class="kpi-card" data-metric="http_req_failed" data-threshold-status="${errorThreshold}">
                 <div class="kpi-header">
                     <span class="kpi-title">Error Rate</span>
-                    <div class="kpi-icon" style="background: ${parseFloat(errorRate) < 5 ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)'}; color: ${parseFloat(errorRate) < 5 ? 'var(--success)' : 'var(--error)'};">🚨</div>
+                    <div class="kpi-icon" style="color: ${errorPresentation.color};">🚨</div>
                 </div>
-                <div class="kpi-value" style="color: ${parseFloat(errorRate) < 5 ? 'var(--success)' : 'var(--error)'}">${errorRate}<span class="kpi-unit">%</span></div>
+                <div class="kpi-value" style="color: ${errorPresentation.color}">${errorRate}<span class="kpi-unit">%</span></div>
                 <div class="metric-bar">
-                    <div class="metric-bar-fill" style="width: ${Math.min(errorRate, 100)}%; background: ${parseFloat(errorRate) < 5 ? 'var(--success)' : 'var(--error)'};"></div>
+                    <div class="metric-bar-fill" style="width: ${Math.min(errorRate, 100)}%; background: ${errorPresentation.color};"></div>
                 </div>
             </div>
             
-            <div class="kpi-card">
+            <div class="kpi-card" data-metric="checks" data-threshold-status="${checksThreshold}">
                 <div class="kpi-header">
                     <span class="kpi-title">Checks Passed</span>
-                    <div class="kpi-icon" style="background: ${parseFloat(checksPass) > 90 ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)'}; color: ${parseFloat(checksPass) > 90 ? 'var(--success)' : 'var(--warning)'};">✅</div>
+                    <div class="kpi-icon" style="color: ${checksPresentation.color};">✅</div>
                 </div>
-                <div class="kpi-value" style="color: ${parseFloat(checksPass) > 90 ? 'var(--success)' : 'var(--warning)'}">${checksPass}<span class="kpi-unit">%</span></div>
+                <div class="kpi-value" style="color: ${checksPresentation.color}">${checksPass}<span class="kpi-unit">%</span></div>
                 <div class="metric-bar">
-                    <div class="metric-bar-fill" style="width: ${checksPass}%; background: ${parseFloat(checksPass) > 90 ? 'var(--success)' : 'var(--warning)'};"></div>
+                    <div class="metric-bar-fill" style="width: ${checksPass}%; background: ${checksPresentation.color};"></div>
                 </div>
             </div>
         </div>
@@ -359,38 +371,36 @@ export function generateHtmlReport(data, testType = 'performance', targetUrl = n
                     <tr>
                         <td>Minimum</td>
                         <td>${minDuration} ms</td>
-                        <td><span class="trend-good">✓</span></td>
+                        <td><span class="${durationPresentation.cssClass}">${durationPresentation.symbol}</span></td>
                     </tr>
                     <tr>
                         <td>Average</td>
                         <td>${avgDuration} ms</td>
-                        <td><span class="${parseFloat(avgDuration) < 1000 ? 'trend-good' : 'trend-warning'}">${parseFloat(avgDuration) < 1000 ? '✓' : '⚠'}</span></td>
+                        <td><span class="${durationPresentation.cssClass}">${durationPresentation.symbol}</span></td>
                     </tr>
                     <tr>
                         <td>p(90)</td>
-                        <td>${getMetricValue('http_req_duration', 'p(90)').toFixed(2)} ms</td>
-                        <td><span class="${parseFloat(getMetricValue('http_req_duration', 'p(90)')) < 2000 ? 'trend-good' : 'trend-warning'}">${parseFloat(getMetricValue('http_req_duration', 'p(90)')) < 2000 ? '✓' : '⚠'}</span></td>
+                        <td>${p90Duration} ms</td>
+                        <td><span class="${durationPresentation.cssClass}">${durationPresentation.symbol}</span></td>
                     </tr>
                     <tr>
                         <td>p(95)</td>
                         <td>${p95Duration} ms</td>
-                        <td><span class="${parseFloat(p95Duration) < 3000 ? 'trend-good' : 'trend-warning'}">${parseFloat(p95Duration) < 3000 ? '✓' : '⚠'}</span></td>
+                        <td><span class="${durationPresentation.cssClass}">${durationPresentation.symbol}</span></td>
                     </tr>
                     <tr>
                         <td>p(99)</td>
                         <td>${p99Duration} ms</td>
-                        <td><span class="${parseFloat(p99Duration) < 5000 ? 'trend-good' : 'trend-bad'}">${parseFloat(p99Duration) < 5000 ? '✓' : '✗'}</span></td>
+                        <td><span class="${durationPresentation.cssClass}">${durationPresentation.symbol}</span></td>
                     </tr>
                     <tr>
                         <td>Maximum</td>
                         <td>${maxDuration} ms</td>
-                        <td><span class="trend-good">✓</span></td>
+                        <td><span class="${durationPresentation.cssClass}">${durationPresentation.symbol}</span></td>
                     </tr>
                 </tbody>
             </table>
         </div>
-        
-        ${generateSloSection(data)}
         
         <div class="section">
             <h2 class="section-title">🔍 Test Configuration</h2>
@@ -404,106 +414,17 @@ export function generateHtmlReport(data, testType = 'performance', targetUrl = n
                 <tbody>
                     <tr><td>Test Type</td><td>${testType}</td></tr>
                     <tr><td>Target API</td><td>${apiTarget}</td></tr>
-                    <tr><td>Total Iterations</td><td>${getMetricValue('iterations', 'count')}</td></tr>
-                    <tr><td>Data Received</td><td>${(getMetricValue('data_received', 'count') / 1024).toFixed(2)} KB</td></tr>
-                    <tr><td>Data Sent</td><td>${(getMetricValue('data_sent', 'count') / 1024).toFixed(2)} KB</td></tr>
+                    <tr><td>Total Iterations</td><td>${model.operations.iterations}</td></tr>
+                    <tr><td>Data Received</td><td>${(model.operations.dataReceivedBytes / 1024).toFixed(2)} KB</td></tr>
+                    <tr><td>Data Sent</td><td>${(model.operations.dataSentBytes / 1024).toFixed(2)} KB</td></tr>
                 </tbody>
             </table>
         </div>
         
         <footer class="footer">
-            <p>Generated by <a href="https://k6.io">K6 Performance Framework</a> | ${new Date().toLocaleDateString()}</p>
+            <p>Generated by <a href="https://k6.io">K6 Performance Framework</a> | ${new Date(model.timestamp).toLocaleDateString()}</p>
         </footer>
     </div>
 </body>
 </html>`;
 }
-
-function generateSloSection(data) {
-    const slo = evaluateSLO(data, 'read_apis');
-    const eb = slo.errorBudget;
-
-    const budgetColor = eb.isHealthy ? '#10b981' : eb.isWarning ? '#f59e0b' : '#ef4444';
-    const budgetWidth = Math.min(100, eb.percentUsed);
-
-    return `
-        <div class="section">
-            <h2 class="section-title">🎯 SLO Status - ${slo.sloName}</h2>
-            
-            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 1.5rem;">
-                <div style="background: var(--bg-card); padding: 1rem; border-radius: 8px; text-align: center;">
-                    <div style="color: #94a3b8; font-size: 0.875rem;">Latency P95</div>
-                    <div style="font-size: 1.5rem; font-weight: 600; color: ${slo.results.latencyP95.passed ? '#10b981' : '#ef4444'};">
-                        ${slo.results.latencyP95.actual.toFixed(0)}ms
-                    </div>
-                    <div style="color: #64748b; font-size: 0.75rem;">target: <${slo.results.latencyP95.target}ms</div>
-                </div>
-                <div style="background: var(--bg-card); padding: 1rem; border-radius: 8px; text-align: center;">
-                    <div style="color: #94a3b8; font-size: 0.875rem;">Latency P99</div>
-                    <div style="font-size: 1.5rem; font-weight: 600; color: ${slo.results.latencyP99.passed ? '#10b981' : '#ef4444'};">
-                        ${slo.results.latencyP99.actual.toFixed(0)}ms
-                    </div>
-                    <div style="color: #64748b; font-size: 0.75rem;">target: <${slo.results.latencyP99.target}ms</div>
-                </div>
-                <div style="background: var(--bg-card); padding: 1rem; border-radius: 8px; text-align: center;">
-                    <div style="color: #94a3b8; font-size: 0.875rem;">Error Rate</div>
-                    <div style="font-size: 1.5rem; font-weight: 600; color: ${slo.results.errorRate.passed ? '#10b981' : '#ef4444'};">
-                        ${(slo.results.errorRate.actual * 100).toFixed(2)}%
-                    </div>
-                    <div style="color: #64748b; font-size: 0.75rem;">target: <${(slo.results.errorRate.target * 100).toFixed(2)}%</div>
-                </div>
-            </div>
-            
-            <div style="background: var(--bg-card); padding: 1.5rem; border-radius: 12px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
-                    <span style="font-weight: 600;">Error Budget</span>
-                    <span style="color: ${budgetColor}; font-weight: 600;">${eb.percentUsed.toFixed(1)}% used</span>
-                </div>
-                <div style="background: #334155; border-radius: 8px; height: 12px; overflow: hidden;">
-                    <div style="background: ${budgetColor}; height: 100%; width: ${budgetWidth}%; transition: width 0.3s;"></div>
-                </div>
-                <div style="display: flex; justify-content: space-between; margin-top: 0.5rem; color: #94a3b8; font-size: 0.875rem;">
-                    <span>${eb.errorBudgetRemaining} remaining of ${eb.errorBudgetTotal}</span>
-                    <span>${eb.summary}</span>
-                </div>
-            </div>
-            
-            <div style="margin-top: 1rem; padding: 1rem; background: ${slo.allPassed ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)'}; border-radius: 8px; text-align: center;">
-                <span style="font-size: 1.25rem; font-weight: 600; color: ${slo.allPassed ? '#10b981' : '#ef4444'};">
-                    ${slo.allPassed ? '✓ All SLOs Passed' : '✗ SLO Violations Detected'}
-                </span>
-            </div>
-        </div>
-    `;
-}
-
-/**
- * Generate JSON summary
- */
-export function generateJsonSummary(data) {
-    const metrics = data.metrics || {};
-
-    return {
-        timestamp: new Date().toISOString(),
-        summary: {
-            totalRequests: metrics.http_reqs?.values?.count || 0,
-            requestRate: metrics.http_reqs?.values?.rate || 0,
-            errorRate: (metrics.http_req_failed?.values?.rate || 0) * 100,
-            checksPassed: (metrics.checks?.values?.rate || 0) * 100
-        },
-        responseTime: {
-            avg: metrics.http_req_duration?.values?.avg || 0,
-            min: metrics.http_req_duration?.values?.min || 0,
-            max: metrics.http_req_duration?.values?.max || 0,
-            p90: metrics.http_req_duration?.values?.['p(90)'] || 0,
-            p95: metrics.http_req_duration?.values?.['p(95)'] || 0,
-            p99: metrics.http_req_duration?.values?.['p(99)'] || 0
-        },
-        thresholds: data.thresholds || {}
-    };
-}
-
-export default {
-    generateHtmlReport,
-    generateJsonSummary
-};

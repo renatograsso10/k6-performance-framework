@@ -2,55 +2,36 @@
  * Soak Test - Extended duration stability
  */
 
-import { group, sleep, check } from 'k6';
+import { group, sleep } from 'k6';
 import { getThresholds } from '../src/config/thresholds.js';
-import { getEnvironment } from '../src/config/environments.js';
-import { peopleApi } from '../src/api/peopleApi.js';
-import { planetsApi } from '../src/api/planetsApi.js';
-import { starshipsApi } from '../src/api/starshipsApi.js';
-import { logger } from '../src/core/logger.js';
-import { generateHtmlReport, generateJsonSummary } from '../src/core/reporter.js';
-import { recordApiMetrics } from '../src/core/metrics.js';
+import { createRunProfile } from '../src/core/runProfile.js';
+import { checkSwapiResponse, getSwapiResource, randomSwapiResource } from '../src/workloads/swapi.js';
 
-export const options = {
-    stages: [
-        { duration: '2m', target: 50 },
-        { duration: '30m', target: 50 },
-        { duration: '2m', target: 0 }
-    ],
-    thresholds: getThresholds('soak'),
-    summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)']
-};
+const profile = createRunProfile({
+    name: 'soak',
+    options: {
+        stages: [
+            { duration: '2m', target: 50 },
+            { duration: '30m', target: 50 },
+            { duration: '2m', target: 0 }
+        ],
+        thresholds: getThresholds('soak')
+    },
+    metadata: { intent: 'detect degradation over sustained traffic', workload: 'people, planets and starships reads' }
+});
 
-const environment = getEnvironment();
-
-export function setup() {
-    logger.info('Starting SOAK Test', { testType: 'soak', environment: environment.baseUrl });
-    return { startTime: Date.now() };
-}
+export const options = profile.options;
+export const setup = profile.setup;
+export const teardown = profile.teardown;
+export const handleSummary = profile.handleSummary;
 
 export default function () {
-    const endpoints = [peopleApi, planetsApi, starshipsApi];
-    const api = endpoints[Math.floor(Math.random() * endpoints.length)];
-    const id = Math.floor(Math.random() * 10) + 1;
+    const resource = randomSwapiResource(['people', 'planets', 'starships']);
 
     group('Soak Operations', () => {
-        const resp = api.get(id);
-        check(resp, { 'status ok': (r) => r.status === 200 });
-        recordApiMetrics('soak.request', resp.timings.duration, resp.status === 200, resp.status);
+        const response = getSwapiResource(resource);
+        checkSwapiResponse(response, `${resource}.get`);
     });
 
     sleep(0.5);
-}
-
-export function teardown(data) {
-    const duration = (Date.now() - data.startTime) / 1000;
-    logger.info('SOAK Test Complete', { duration: `${(duration / 60).toFixed(1)} min` });
-}
-
-export function handleSummary(data) {
-    return {
-        'reports/soak-report.html': generateHtmlReport(data, 'soak'),
-        'reports/soak-summary.json': JSON.stringify(generateJsonSummary(data), null, 2)
-    };
 }

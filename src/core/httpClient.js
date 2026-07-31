@@ -3,16 +3,20 @@
  */
 
 import http from 'k6/http';
-import { getBaseUrl, getDefaultHeaders } from '../config/environments.js';
+import { getDefaultHeaders, getEnvironment } from '../config/environments.js';
 import { logger } from './logger.js';
-import { recordApiMetrics, recordEndpointMetrics } from './metrics.js';
+import { recordApiMetrics } from './metrics.js';
+import { getRunId, getTargetKind } from './telemetry.js';
 
 export class HttpClient {
     constructor(options = {}) {
-        this.baseUrl = options.baseUrl || getBaseUrl();
+        const environment = getEnvironment();
+        this.baseUrl = options.baseUrl ?? environment.baseUrl;
         this.defaultHeaders = { ...getDefaultHeaders(), ...options.headers };
-        this.timeout = options.timeout || '30s';
-        this.retries = options.retries || 0;
+        this.timeout = options.timeout ?? environment.timeout;
+        this.retries = options.retries ?? environment.maxRetries;
+        this.runId = options.runId ?? getRunId();
+        this.targetKind = options.targetKind ?? getTargetKind();
     }
 
     buildUrl(path) {
@@ -28,8 +32,10 @@ export class HttpClient {
         const success = response.status >= 200 && response.status < 400;
 
         logger.http(method, url, response.status, duration);
-        recordApiMetrics(url, duration, success, response.status);
-        recordEndpointMetrics(endpointType, duration);
+        recordApiMetrics(endpointType, duration, success, response.status, {
+            run_id: this.runId,
+            target_kind: this.targetKind
+        });
 
         return {
             status: response.status,
@@ -50,8 +56,9 @@ export class HttpClient {
         for (let attempt = 0; attempt <= this.retries; attempt++) {
             try {
                 const response = requestFn();
+                const processedResponse = this.processResponse(response, method, url, endpointType);
                 if (response.status < 500 || attempt === this.retries) {
-                    return this.processResponse(response, method, url, endpointType);
+                    return processedResponse;
                 }
                 logger.warn(`Retry ${attempt + 1}/${this.retries} for ${method} ${url}`);
             } catch (error) {
@@ -62,11 +69,11 @@ export class HttpClient {
         throw lastError;
     }
 
-    get(path, params = {}, options = {}) {
+    get(path, options = {}) {
         const url = this.buildUrl(path);
         const requestParams = {
             headers: this.mergeHeaders(options.headers),
-            tags: { type: options.endpointType || 'api', method: 'GET' },
+            tags: this.requestTags('GET', options.endpointType),
             timeout: this.timeout
         };
         return this.executeWithRetry(() => http.get(url, requestParams), 'GET', url, options.endpointType || 'api');
@@ -76,7 +83,7 @@ export class HttpClient {
         const url = this.buildUrl(path);
         const requestParams = {
             headers: this.mergeHeaders(options.headers),
-            tags: { type: options.endpointType || 'api', method: 'POST' },
+            tags: this.requestTags('POST', options.endpointType),
             timeout: this.timeout
         };
         return this.executeWithRetry(() => http.post(url, JSON.stringify(body), requestParams), 'POST', url, options.endpointType || 'api');
@@ -86,7 +93,7 @@ export class HttpClient {
         const url = this.buildUrl(path);
         const requestParams = {
             headers: this.mergeHeaders(options.headers),
-            tags: { type: options.endpointType || 'api', method: 'PUT' },
+            tags: this.requestTags('PUT', options.endpointType),
             timeout: this.timeout
         };
         return this.executeWithRetry(() => http.put(url, JSON.stringify(body), requestParams), 'PUT', url, options.endpointType || 'api');
@@ -96,7 +103,7 @@ export class HttpClient {
         const url = this.buildUrl(path);
         const requestParams = {
             headers: this.mergeHeaders(options.headers),
-            tags: { type: options.endpointType || 'api', method: 'PATCH' },
+            tags: this.requestTags('PATCH', options.endpointType),
             timeout: this.timeout
         };
         return this.executeWithRetry(() => http.patch(url, JSON.stringify(body), requestParams), 'PATCH', url, options.endpointType || 'api');
@@ -106,12 +113,18 @@ export class HttpClient {
         const url = this.buildUrl(path);
         const requestParams = {
             headers: this.mergeHeaders(options.headers),
-            tags: { type: options.endpointType || 'api', method: 'DELETE' },
+            tags: this.requestTags('DELETE', options.endpointType),
             timeout: this.timeout
         };
         return this.executeWithRetry(() => http.del(url, null, requestParams), 'DELETE', url, options.endpointType || 'api');
     }
-}
 
-export const httpClient = new HttpClient();
-export default HttpClient;
+    requestTags(method, endpointType = 'api') {
+        return {
+            type: endpointType,
+            method,
+            run_id: this.runId,
+            target_kind: this.targetKind
+        };
+    }
+}
