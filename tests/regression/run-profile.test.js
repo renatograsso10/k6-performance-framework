@@ -36,6 +36,7 @@ export default function () {
     const json = JSON.parse(reports['reports/contract-summary.json']);
     const controlledTarget = __ENV.EXPECT_PUBLIC_TARGET_REDACTED === 'true';
     const expectedTargetKind = __ENV.TARGET_KIND || 'unspecified';
+    const expectedRunId = __ENV.RUN_ID || 'local';
     profile.teardown(context);
 
     check({ context, reports, json }, {
@@ -53,7 +54,7 @@ export default function () {
                 && json.profile.target === __ENV.BASE_URL)
             : html.includes(__ENV.BASE_URL),
         'summary carries declared profile metadata': (result) => result.json.profile.name === 'contract'
-            && result.json.profile.runId === 'local'
+            && result.json.profile.runId === expectedRunId
             && result.json.profile.targetKind === expectedTargetKind
             && result.json.profile.intent === 'verify lifecycle contract'
             && result.json.profile.workload === 'fixture-read'
